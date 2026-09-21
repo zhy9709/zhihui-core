@@ -2,8 +2,8 @@
 > 上游：spec.md v1.2 ｜ 仓库：zhy9709/zhihui-core ｜ CLI：zh ｜ 2026-09-21
 
 ## 1. 形态与技术选型
-- 纯 Node.js ≥18、**零第三方依赖** CLI（ESM，`node --test`），命令入口 `zh`
-- 无数据库、无前端：状态=fleet.yaml + state/fleet-state.json + git 分支；微信是唯一人机界面（由 PM 小派操作）
+- 纯 Node.js ≥18、**零第三方依赖** CLI（v2.0：注册表 JSON 化，幂等 task-id、状态机+unknown 不重派、结构化验收配置——详见 spec.md 变更记录）（ESM，`node --test`），命令入口 `zh`
+- 无数据库、无前端：状态=fleet.json + state/fleet-state.json + git 分支；微信是唯一人机界面（由 PM 小派操作）
 - 运行位置：树莓派（调度大脑+git 中枢）；重执行器宿主=台式机 Win x86（SSH 已通）
 
 ## 2. 目录布局
