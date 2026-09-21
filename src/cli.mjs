@@ -2,13 +2,14 @@ import { readFile } from 'node:fs/promises';
 import { addDriver, collectStatus, doctor, loadFleet, validateFleet } from './fleet.mjs';
 import { TaskStore } from './tasks.mjs';
 import { attach, launch, prepare, registerManual, renderLaunch, worktreePath } from './runner.mjs';
+import { collect, history, prune } from './collector.mjs';
 
 function option(args, name, fallback) { const index = args.indexOf(name); return index < 0 ? fallback : args[index + 1]; }
 function print(value, out) { out(`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`); }
 function positional(args) { const optionsWithValue = new Set(['--fleet', '--data', '--to', '--branch', '--task-id']); return args.filter((value, index) => !value.startsWith('--') && !optionsWithValue.has(args[index - 1])); }
 function findDriver(fleet, name) { const driver = fleet.drivers.find((item) => item.name === name); if (!driver) throw new Error(`driver ${name} not found`); return driver; }
 
-export async function run(argv, { out = process.stdout.write.bind(process.stdout), err = process.stderr.write.bind(process.stderr), probe, now, runnerOptions = {} } = {}) {
+export async function run(argv, { out = process.stdout.write.bind(process.stdout), err = process.stderr.write.bind(process.stderr), probe, now, runnerOptions = {}, collectorOptions = {} } = {}) {
   const [command, ...args] = argv;
   const fleetFile = option(args, '--fleet', 'fleet.json');
   const dataDir = option(args, '--data', 'state');
@@ -42,7 +43,10 @@ export async function run(argv, { out = process.stdout.write.bind(process.stdout
     if (command === 'tasks') { const tasks = await new TaskStore(dataDir, { now }).list(); print(tasks.map(({ task_id, status, driver, commit }) => ({ task_id, status, driver: driver || null, commit: commit || null })), out); return 0; }
     if (command === 'dispatch-done') { const taskId = positional(args)[0]; if (!taskId) throw new Error('usage: zh dispatch-done task-id [--failed]'); const status = args.includes('--failed') ? 'failed' : 'done'; print(await new TaskStore(dataDir, { now }).transition(taskId, status, { reason: 'manual-verdict' }), out); return 0; }
     if (command === 'recover') { const recovered = await new TaskStore(dataDir, { now }).recover({ staleAfterMs: 30_000 }); print({ recovered }, out); return 0; }
-    throw new Error('usage: zh <validate|add|list|doctor|status|task-create|dispatch|attach|tasks|dispatch-done|recover>');
+    if (command === 'collect') { const taskId = positional(args)[0]; if (!taskId) throw new Error('usage: zh collect task-id'); print(await collect(taskId, { store: new TaskStore(dataDir, { now }), ...collectorOptions }), out); return 0; }
+    if (command === 'prune') { print({ pruned: await prune(new TaskStore(dataDir, { now }), collectorOptions) }, out); return 0; }
+    if (command === 'history') { const taskId = positional(args)[0]; if (!taskId) throw new Error('usage: zh history task-id'); print(await history(new TaskStore(dataDir, { now }), taskId), out); return 0; }
+    throw new Error('usage: zh <validate|add|list|doctor|status|task-create|dispatch|attach|tasks|dispatch-done|collect|prune|history>');
   } catch (error) { err(`FAIL ${error.message}\n`); return error.code === 'IDEMPOTENCY_CONFLICT' ? 3 : 2; }
 }
 

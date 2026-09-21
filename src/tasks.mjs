@@ -6,9 +6,10 @@ const TRANSITIONS = {
   queued: new Set(['locked']),
   locked: new Set(['queued', 'running', 'dispatched', 'failed', 'unknown']),
   running: new Set(['done', 'succeeded', 'failed', 'unknown']),
-  dispatched: new Set(['done', 'failed', 'unknown']),
+  dispatched: new Set(['done', 'failed', 'unknown', 'verified', 'rejected']),
   unknown: new Set(['done', 'failed']),
-  succeeded: new Set(), done: new Set(), failed: new Set()
+  succeeded: new Set(['verified', 'rejected']),
+  verified: new Set(), rejected: new Set(), done: new Set(), failed: new Set()
 };
 
 export class TaskConflictError extends Error {
