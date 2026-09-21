@@ -24,6 +24,8 @@ export function validateFleet(fleet, file = 'fleet.json') {
     throw new FleetValidationError(file, ['root must be an object']);
   }
   if (!Array.isArray(fleet.drivers)) issues.push('drivers must be an array');
+  if ('workspaces_root' in fleet && (typeof fleet.workspaces_root !== 'string' || !fleet.workspaces_root.trim())) issues.push('workspaces_root must be a non-empty string');
+  if ('max_worktrees' in fleet && (!Number.isInteger(fleet.max_worktrees) || fleet.max_worktrees < 1)) issues.push('max_worktrees must be a positive integer');
   const names = new Set();
   for (const [index, driver] of (fleet.drivers || []).entries()) {
     const at = `drivers[${index}]`;
