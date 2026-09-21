@@ -6,6 +6,6 @@
   "engines": { "node": ">=18" },
   "scripts": {
     "test": "node --test",
-    "check": "node --check src/cli.mjs && node --check src/fleet.mjs && node --check src/state.mjs && node --check src/tasks.mjs && node --check src/runner.mjs && node --check src/gates.mjs && node --check src/collector.mjs"
+    "check": "node --check src/cli.mjs && node --check src/fleet.mjs && node --check src/state.mjs && node --check src/tasks.mjs && node --check src/runner.mjs && node --check src/gates.mjs && node --check src/collector.mjs && node --check src/router.mjs && node --check src/usage.mjs"
   }
 }
