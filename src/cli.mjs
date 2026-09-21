@@ -1,11 +1,14 @@
 import { readFile } from 'node:fs/promises';
 import { addDriver, collectStatus, doctor, loadFleet, validateFleet } from './fleet.mjs';
 import { TaskStore } from './tasks.mjs';
+import { attach, launch, prepare, registerManual, renderLaunch, worktreePath } from './runner.mjs';
 
 function option(args, name, fallback) { const index = args.indexOf(name); return index < 0 ? fallback : args[index + 1]; }
 function print(value, out) { out(`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\n`); }
+function positional(args) { const optionsWithValue = new Set(['--fleet', '--data', '--to', '--branch', '--task-id']); return args.filter((value, index) => !value.startsWith('--') && !optionsWithValue.has(args[index - 1])); }
+function findDriver(fleet, name) { const driver = fleet.drivers.find((item) => item.name === name); if (!driver) throw new Error(`driver ${name} not found`); return driver; }
 
-export async function run(argv, { out = process.stdout.write.bind(process.stdout), err = process.stderr.write.bind(process.stderr), probe, now } = {}) {
+export async function run(argv, { out = process.stdout.write.bind(process.stdout), err = process.stderr.write.bind(process.stderr), probe, now, runnerOptions = {} } = {}) {
   const [command, ...args] = argv;
   const fleetFile = option(args, '--fleet', 'fleet.json');
   const dataDir = option(args, '--data', 'state');
@@ -16,8 +19,30 @@ export async function run(argv, { out = process.stdout.write.bind(process.stdout
     if (command === 'doctor') { const result = await doctor(await loadFleet(fleetFile), { file: fleetFile, probe }); print(result, out); return result.exitCode; }
     if (command === 'status') { const result = await collectStatus(await loadFleet(fleetFile), { dataDir, probe, now }); print(result, out); return result.health.exitCode; }
     if (command === 'task-create') { const taskId = option(args, '--task-id'); if (!taskId) throw new Error('usage: zh task-create --task-id ID'); const task = await new TaskStore(dataDir, { now }).create({ task_id: taskId }); print(task, out); return 0; }
-    if (command === 'recover') { const recovered = await new TaskStore(dataDir, { now }).recover(); print({ recovered }, out); return 0; }
-    throw new Error('usage: zh <validate|add|list|doctor|status|task-create|recover>');
+    if (command === 'dispatch') {
+      const taskFile = positional(args)[0]; if (!taskFile) throw new Error('usage: zh dispatch task.json --to driver [--dry]');
+      const payload = JSON.parse(await readFile(taskFile, 'utf8')); const taskId = payload.task_id || payload['task-id'];
+      if (!taskId) throw new Error('task JSON requires task_id');
+      const fleet = await loadFleet(fleetFile); validateFleet(fleet, fleetFile);
+      const requested = option(args, '--to', payload.driver || (fleet.drivers.length === 1 ? fleet.drivers[0].name : null));
+      if (!requested) throw new Error('dispatch requires --to driver when more than one driver exists');
+      const driver = findDriver(fleet, requested); const root = fleet.workspaces_root || payload.workspaces_root;
+      if (args.includes('--dry')) {
+        const context = { worktree: root ? worktreePath(root, taskId) : '<worktree>', logFile: '<log>' };
+        print({ dry: true, driver: driver.name, command: driver.kind === 'manual' ? '任务书已登记待粘贴' : renderLaunch(driver, { payload }, context) }, out);
+        return 0;
+      }
+      const store = new TaskStore(dataDir, { now }); const task = await store.create({ task_id: taskId, payload });
+      await store.transition(taskId, 'locked', { driver: driver.name });
+      if (driver.kind === 'manual') { print(await registerManual(driver, task, store), out); return 0; }
+      const context = await prepare(task, driver, { workspacesRoot: root, maxWorktrees: fleet.max_worktrees, ...runnerOptions });
+      const result = await launch(driver, task, { store, ...context, ...runnerOptions }); print(result, out); return 0;
+    }
+    if (command === 'attach') { const taskId = positional(args)[0]; const branch = option(args, '--branch'); if (!taskId || !branch) throw new Error('usage: zh attach task-id --branch ref'); print(await attach(taskId, branch, new TaskStore(dataDir, { now })), out); return 0; }
+    if (command === 'tasks') { const tasks = await new TaskStore(dataDir, { now }).list(); print(tasks.map(({ task_id, status, driver, commit }) => ({ task_id, status, driver: driver || null, commit: commit || null })), out); return 0; }
+    if (command === 'dispatch-done') { const taskId = positional(args)[0]; if (!taskId) throw new Error('usage: zh dispatch-done task-id [--failed]'); const status = args.includes('--failed') ? 'failed' : 'done'; print(await new TaskStore(dataDir, { now }).transition(taskId, status, { reason: 'manual-verdict' }), out); return 0; }
+    if (command === 'recover') { const recovered = await new TaskStore(dataDir, { now }).recover({ staleAfterMs: 30_000 }); print({ recovered }, out); return 0; }
+    throw new Error('usage: zh <validate|add|list|doctor|status|task-create|dispatch|attach|tasks|dispatch-done|recover>');
   } catch (error) { err(`FAIL ${error.message}\n`); return error.code === 'IDEMPOTENCY_CONFLICT' ? 3 : 2; }
 }
 

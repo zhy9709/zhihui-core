@@ -1,12 +1,14 @@
 import { join } from 'node:path';
-import { readdir, rm } from 'node:fs/promises';
+import { readdir, rm, stat } from 'node:fs/promises';
 import { appendEvent, atomicWriteJson, readJson } from './state.mjs';
 
 const TRANSITIONS = {
   queued: new Set(['locked']),
-  locked: new Set(['running', 'failed', 'unknown']),
-  running: new Set(['done', 'failed', 'unknown']),
-  done: new Set(), failed: new Set(), unknown: new Set()
+  locked: new Set(['queued', 'running', 'dispatched', 'failed', 'unknown']),
+  running: new Set(['done', 'succeeded', 'failed', 'unknown']),
+  dispatched: new Set(['done', 'failed', 'unknown']),
+  unknown: new Set(['done', 'failed']),
+  succeeded: new Set(), done: new Set(), failed: new Set()
 };
 
 export class TaskConflictError extends Error {
@@ -37,17 +39,37 @@ export class TaskStore {
     return task;
   }
 
-  async transition(taskId, next) {
+  async transition(taskId, next, patch = {}) {
     const task = await this.get(taskId);
     if (!task) throw new TaskStateError(`task-id ${taskId} does not exist`);
     if (!TRANSITIONS[task.status]?.has(next)) throw new TaskStateError(`invalid transition ${task.status} -> ${next}`);
     task.status = next; task.updated_at = this.now();
+    Object.assign(task, patch);
     if (next === 'running') task.heartbeat_at = this.now();
     await atomicWriteJson(this.taskPath(taskId), task);
     if (next === 'locked' || next === 'running') await atomicWriteJson(this.lockPath(taskId), { task_id: taskId, status: next, heartbeat_at: task.heartbeat_at, updated_at: task.updated_at });
-    if (['done', 'failed', 'unknown'].includes(next)) await rm(this.lockPath(taskId), { force: true });
-    await appendEvent(this.eventsFile, { type: 'task.transition', task_id: taskId, status: next, at: this.now() });
+    else await rm(this.lockPath(taskId), { force: true });
+    await appendEvent(this.eventsFile, { type: 'task.transition', task_id: taskId, status: next, at: this.now(), ...patch });
     return task;
+  }
+
+  async annotate(taskId, patch, type = 'task.annotated') {
+    const task = await this.get(taskId);
+    if (!task) throw new TaskStateError(`task-id ${taskId} does not exist`);
+    Object.assign(task, patch, { updated_at: this.now() });
+    await atomicWriteJson(this.taskPath(taskId), task);
+    await appendEvent(this.eventsFile, { type, task_id: taskId, at: this.now(), ...patch });
+    return task;
+  }
+
+  async event(type, taskId, fields = {}) {
+    await appendEvent(this.eventsFile, { type, task_id: taskId, at: this.now(), ...fields });
+  }
+
+  async list() {
+    let files = [];
+    try { files = await readdir(this.tasksDir); } catch (error) { if (error.code !== 'ENOENT') throw error; }
+    return Promise.all(files.filter((name) => name.endsWith('.json')).sort().map((file) => readJson(join(this.tasksDir, file), null)));
   }
 
   async heartbeat(taskId) {
@@ -68,8 +90,15 @@ export class TaskStore {
       const lock = await readJson(join(this.locksDir, file), null);
       if (!lock) continue;
       const task = await this.get(lock.task_id);
-      const heartbeat = Date.parse(task?.heartbeat_at || lock.heartbeat_at || 0);
-      if (task?.status === 'running' && (!Number.isFinite(heartbeat) || nowMs - heartbeat > staleAfterMs)) {
+      let heartbeat = Date.parse(task?.heartbeat_at || lock.heartbeat_at || 0);
+      if (task?.heartbeat_file) {
+        try { heartbeat = (await stat(task.heartbeat_file)).mtimeMs; }
+        catch (error) { if (error.code === 'ENOENT') heartbeat = 0; else throw error; }
+      }
+      if (task?.status === 'locked') {
+        await this.transition(task.task_id, 'queued', { recovery: 'locked-without-running' });
+        recovered.push(task.task_id);
+      } else if (task?.status === 'running' && (!Number.isFinite(heartbeat) || nowMs - heartbeat > staleAfterMs)) {
         await this.transition(task.task_id, 'unknown');
         recovered.push(task.task_id);
       }
