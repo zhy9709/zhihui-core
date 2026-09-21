@@ -1,0 +1,11 @@
+{
+  "name": "zhihui-core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=18" },
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/cli.mjs && node --check src/fleet.mjs && node --check src/state.mjs && node --check src/tasks.mjs"
+  }
+}

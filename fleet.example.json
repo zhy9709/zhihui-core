@@ -1,0 +1,16 @@
+{
+  "drivers": [
+    {
+      "name": "codex",
+      "kind": "headless",
+      "command": "codex",
+      "caps": ["node", "review"],
+      "cost": { "tier": "paid-fixed", "plan": "Plus" },
+      "quota_probe": null,
+      "host": "windows-worker",
+      "platform": "win",
+      "timeout_min": 30,
+      "rate_limit": "5h window limits apply"
+    }
+  ]
+}
