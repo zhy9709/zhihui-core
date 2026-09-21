@@ -21,3 +21,20 @@ zh tasks --data state
 ```
 
 headless driver 的 `launch` 可使用 `{brief}`、`{worktree}`、`{log}` 占位符。先用 `--dry` 预览命令；manual driver 不启动进程，显示“任务书已登记待粘贴”，随后用 `zh attach hello-1 --branch agent/hello-1` 登记外部产物。
+
+## Collect 验收收口（T3）
+
+```mermaid
+flowchart TD
+  A["zh collect task-id"] --> B{"acceptance 全部通过?"}
+  B -->|是| C["merge + verified tag + 保留 worktree 24h"]
+  B -->|否| D["rejected + state/rework 工单"]
+```
+
+验收命令只来自任务 JSON 的 `acceptance.checks`，并以数组参数直接运行；任务 brief 和日志不会被执行。
+
+```sh
+zh collect hello-1 --data state
+zh history hello-1 --data state
+zh prune --data state       # 仅清理已过 24 小时保留期的 verified worktree
+```
